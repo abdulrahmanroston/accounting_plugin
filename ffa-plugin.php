@@ -26,8 +26,8 @@ define('FFA_API_SECRET', 'ffa-secret-key-2025-v3');
  * Note: Requires plugin-update-checker library to be installed
  * Download from: https://github.com/YahnisElsts/plugin-update-checker
  */
-if (file_exists(FFA_PATH . 'includes/plugin-update-checker/plugin-update-checker.php')) {
-    require FFA_PATH . 'includes/plugin-update-checker/plugin-update-checker.php';
+if (file_exists(FFA_PATH . 'includes/plugin-update-checker-master/plugin-update-checker.php')) {
+    require FFA_PATH . 'includes/plugin-update-checker-master/plugin-update-checker.php';
     
     use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
     
