@@ -1,0 +1,2469 @@
+# 📘 **FFA Plugin - Complete Documentation**
+
+**Frozen Factory Accounting (FFA) Plugin v3.0**  
+**Developer Guide & API Reference**
+
+---
+
+## 📑 **Table of Contents**
+
+1. [Overview](#1-overview)
+2. [Architecture](#2-architecture)
+3. [Installation & Setup](#3-installation--setup)
+4. [Database Schema](#4-database-schema)
+5. [API Reference](#5-api-reference)
+6. [Admin Interface](#6-admin-interface)
+7. [WooCommerce Integration](#7-woocommerce-integration)
+8. [Hooks & Filters](#8-hooks--filters)
+9. [Code Examples](#9-code-examples)
+10. [Best Practices](#10-best-practices)
+11. [Troubleshooting](#11-troubleshooting)
+
+***
+
+## 1. Overview
+
+### 1.1 What is FFA?
+
+**Frozen Factory Accounting (FFA)** is a comprehensive financial management plugin for WordPress that integrates seamlessly with WooCommerce and SHRMS (Staff & HR Management System).
+
+### 1.2 Key Features
+
+✅ **Financial Management**
+- Multi-vault cash management with commission support
+- Expense tracking and categorization
+- Revenue/expense cashflow monitoring
+- Real-time financial reports
+
+✅ **Vendor & Purchase Management**
+- Vendor database with payment methods
+- Purchase order tracking
+- Material stock integration (FMS)
+- Vendor balance management
+
+✅ **Loan Management**
+- Company loans (borrowed by company)
+- Employee loans (given to employees)
+- Automatic salary deductions
+- Installment tracking
+
+✅ **Payroll Integration**
+- SHRMS salary integration
+- Automatic loan deductions
+- Multi-vault salary payments
+- Payroll reports
+
+✅ **WooCommerce Integration**
+- Automatic vault updates on order completion
+- Commission calculation
+- Warehouse-based routing
+- Refund handling
+
+✅ **RESTful API**
+- JWT authentication
+- Full CRUD operations
+- Batch processing support
+- Real-time data access
+
+***
+
+## 2. Architecture
+
+### 2.1 File Structure
+
+```
+frozen-factory-accounting/
+├── ffa-plugin.php                    # Main plugin file (loader)
+├── includes/
+│   ├── class-ffa-database.php        # Database & core functions
+│   ├── class-ffa-api.php             # REST API endpoints
+│   ├── class-ffa-admin.php           # WordPress admin pages
+│   └── class-ffa-woocommerce.php     # WooCommerce integration
+└── languages/                         # Translation files (future)
+```
+
+### 2.2 Class Overview
+
+```php
+// Core Database & Helpers
+class FFA_Database {
+    static init()              // Initialize
+    static activate()          // Create tables on activation
+    static get_vaults()        // Cached vault retrieval
+    static get_employees()     // Cached employee retrieval
+    static find_vault()        // Smart vault finder
+    static record_cashflow()   // Record transaction
+    static calculate_profit_margin() // Performance-optimized
+}
+
+// REST API
+class FFA_API {
+    static init()              // Register routes
+    static check_permission()  // JWT validation
+    static login()             // Authentication endpoint
+    // ... 40+ API endpoints
+}
+
+// Admin Interface
+class FFA_Admin {
+    static init()              // Register admin pages
+    static dashboard_page()    // Main dashboard
+    static expenses_page()     // Expense management
+    // ... 8+ admin pages
+}
+
+// WooCommerce Integration
+class FFA_WooCommerce {
+    static init()              // Hook into WooCommerce
+    static handle_order_completed()     // Order completion
+    static handle_order_cancelled()     // Order cancellation
+    static handle_partial_refund()      // Partial refunds
+    static auto_process_loan_deductions() // Salary deductions
+}
+```
+
+### 2.3 Design Patterns
+
+**Singleton Pattern:** Each class is static with single initialization  
+**Factory Pattern:** `find_vault()` creates/finds vaults dynamically  
+**Observer Pattern:** WooCommerce hooks for event-driven updates  
+**Repository Pattern:** Cached data retrieval for performance  
+
+***
+
+## 3. Installation & Setup
+
+### 3.1 Requirements
+
+- WordPress 5.8+
+- PHP 7.4+
+- MySQL 5.7+ / MariaDB 10.3+
+- WooCommerce 6.0+ (optional but recommended)
+- SHRMS Plugin (optional for payroll features)
+
+### 3.2 Installation Steps
+
+```bash
+# 1. Upload plugin folder
+wp-content/plugins/frozen-factory-accounting/
+
+# 2. Activate plugin
+WP Admin → Plugins → Activate "FFA Accounting"
+
+# 3. Database tables created automatically
+# ✓ ffa_expenses
+# ✓ ffa_expense_categories
+# ✓ ffa_vaults
+# ✓ ffa_vendors
+# ✓ ffa_purchases
+# ✓ ffa_cashflow
+# ✓ ffa_company_loans
+# ✓ ffa_employee_loans
+# ✓ ffa_loan_payments
+
+# 4. Configure settings
+WP Admin → FFA Accounting → Settings
+```
+
+### 3.3 Initial Configuration
+
+```php
+// Set currency
+update_option('ffa_currency', 'EGP');
+
+// Set main vault
+update_option('ffa_main_vault', 1);
+
+// Set report emails
+update_option('ffa_report_emails', ['admin@example.com']);
+```
+
+***
+
+## 4. Database Schema
+
+### 4.1 Core Tables
+
+#### **`ffa_expenses`** - Expense Tracking
+```sql
+CREATE TABLE wp_ffa_expenses (
+    id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    type ENUM('fixed','variable') NOT NULL,
+    category_id BIGINT(20) UNSIGNED,
+    amount DECIMAL(15,2) NOT NULL,
+    description TEXT,
+    warehouse VARCHAR(50),
+    vault_id BIGINT(20) UNSIGNED,
+    employee_id BIGINT(20) UNSIGNED,
+    created_at DATETIME NOT NULL,
+    created_by BIGINT(20) UNSIGNED,
+    INDEX idx_category (category_id),
+    INDEX idx_vault (vault_id),
+    INDEX idx_created (created_at)
+);
+```
+
+**Usage Example:**
+```php
+$wpdb->insert($wpdb->prefix . 'ffa_expenses', [
+    'type' => 'variable',
+    'category_id' => 5,
+    'amount' => 1500.00,
+    'description' => 'Office supplies',
+    'warehouse' => 'oraby',
+    'vault_id' => 2,
+    'employee_id' => 10,
+    'created_at' => current_time('mysql'),
+    'created_by' => get_current_user_id()
+]);
+```
+
+#### **`ffa_vaults`** - Cash Vaults with Commission
+```sql
+CREATE TABLE wp_ffa_vaults (
+    id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    payment_method VARCHAR(50) NOT NULL,
+    balance DECIMAL(15,2) NOT NULL DEFAULT 0,
+    commission_rate DECIMAL(5,2) DEFAULT 0.00,
+    default_warehouse VARCHAR(100),
+    employees TEXT,
+    is_default TINYINT(1) DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    UNIQUE KEY unique_warehouse_payment (default_warehouse, payment_method),
+    INDEX idx_payment_method (payment_method)
+);
+```
+
+**Fields:**
+- `commission_rate`: Percentage (e.g., 2.5 for 2.5%)
+- `employees`: JSON array of employee IDs
+- `is_default`: Default vault for this payment method
+
+#### **`ffa_cashflow`** - Transaction History
+```sql
+CREATE TABLE wp_ffa_cashflow (
+    id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    type ENUM('revenue','expense') NOT NULL,
+    category_id BIGINT(20) UNSIGNED,
+    amount DECIMAL(15,2) NOT NULL,
+    description TEXT,
+    related_id BIGINT(20) UNSIGNED,
+    related_type VARCHAR(50),
+    warehouse VARCHAR(50),
+    payment_method VARCHAR(50),
+    vault_id BIGINT(20) UNSIGNED,
+    employee_id BIGINT(20) UNSIGNED,
+    order_id INT,
+    created_at DATETIME NOT NULL,
+    INDEX idx_type (type),
+    INDEX idx_vault (vault_id),
+    INDEX idx_order (order_id),
+    INDEX idx_created (created_at)
+);
+```
+
+**Related Types:**
+- `order` - WooCommerce order
+- `expense` - Regular expense
+- `purchase` - Material purchase
+- `salary` - Salary payment
+- `vault_transfer` - Transfer between vaults
+- `company_loan_received` - Company borrowed money
+- `company_loan_payment` - Company paying back
+- `employee_loan_given` - Money given to employee
+- `employee_loan_payment` - Employee paying back
+- `commission` - Commission deduction
+
+### 4.2 Loan Tables
+
+#### **`ffa_employee_loans`**
+```sql
+CREATE TABLE wp_ffa_employee_loans (
+    id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    employee_id BIGINT(20) UNSIGNED NOT NULL,
+    vault_id BIGINT(20) UNSIGNED NOT NULL,
+    loan_amount DECIMAL(15,2) NOT NULL,
+    repayment_type ENUM('lump_sum','installments') NOT NULL,
+    installment_amount DECIMAL(15,2) DEFAULT 0,
+    installment_period INT DEFAULT 0,
+    installment_frequency ENUM('daily','weekly','monthly') DEFAULT 'monthly',
+    auto_deduct_from_salary TINYINT(1) DEFAULT 1,
+    total_paid DECIMAL(15,2) DEFAULT 0,
+    remaining_balance DECIMAL(15,2) NOT NULL,
+    loan_date DATE NOT NULL,
+    due_date DATE,
+    next_payment_date DATE,
+    reason TEXT NOT NULL,
+    status ENUM('active','completed','suspended') DEFAULT 'active',
+    created_at DATETIME NOT NULL,
+    created_by BIGINT(20) UNSIGNED,
+    INDEX idx_employee (employee_id),
+    INDEX idx_status (status),
+    INDEX idx_next_payment (next_payment_date)
+);
+```
+
+**Business Rules:**
+- Installment cannot exceed 50% of employee salary
+- `auto_deduct_from_salary=1` triggers automatic deduction
+- `next_payment_date` calculated based on frequency
+- Status changes to `completed` when `remaining_balance=0`
+
+#### **`ffa_company_loans`**
+```sql
+CREATE TABLE wp_ffa_company_loans (
+    id BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    lender_name VARCHAR(100) NOT NULL,
+    receiver_employee_id BIGINT(20) UNSIGNED NOT NULL,
+    vault_id BIGINT(20) UNSIGNED NOT NULL,
+    loan_amount DECIMAL(15,2) NOT NULL,
+    repayment_type ENUM('lump_sum','installments') NOT NULL,
+    installment_amount DECIMAL(15,2) DEFAULT 0,
+    installment_period INT DEFAULT 0,
+    installment_frequency ENUM('daily','weekly','monthly') DEFAULT 'monthly',
+    total_paid DECIMAL(15,2) DEFAULT 0,
+    remaining_balance DECIMAL(15,2) NOT NULL,
+    loan_date DATE NOT NULL,
+    due_date DATE,
+    next_payment_date DATE,
+    reason TEXT NOT NULL,
+    status ENUM('active','completed','defaulted') DEFAULT 'active',
+    created_at DATETIME NOT NULL,
+    created_by BIGINT(20) UNSIGNED,
+    INDEX idx_receiver (receiver_employee_id),
+    INDEX idx_status (status)
+);
+```
+
+**Difference from Employee Loans:**
+- Company borrows money (increases vault balance)
+- Company pays back (decreases vault balance)
+- No salary deduction option
+
+### 4.3 Relationship Diagram
+
+```
+┌─────────────────┐
+│  WooCommerce    │
+│    Orders       │
+└────────┬────────┘
+         │ triggers
+         ↓
+┌─────────────────┐      ┌──────────────┐
+│   ffa_vaults    │←────→│ ffa_cashflow │
+└────────┬────────┘      └──────┬───────┘
+         │                       │
+         │ used by              │ records
+         ↓                       ↓
+┌─────────────────┐      ┌──────────────┐
+│  ffa_expenses   │      │ ffa_purchases│
+└─────────────────┘      └──────────────┘
+         │                       │
+         └───────┬───────────────┘
+                 ↓
+         ┌──────────────┐
+         │ffa_vendors   │
+         └──────────────┘
+```
+
+***
+
+## 5. API Reference
+
+### 5.1 Authentication
+
+**Base URL:** `https://yoursite.com/wp-json/ffa/v1`
+
+#### **Login**
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "phone": "01234567890",
+  "password": "your_password"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Login successful",
+  "data": {
+    "token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+    "employee": {
+      "id": 5,
+      "name": "Ahmed Ali",
+      "phone": "01234567890",
+      "role": "admin"
+    }
+  }
+}
+```
+
+**Token Usage:**
+```http
+Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
+```
+
+### 5.2 Dashboard
+
+#### **Get Dashboard Data**
+```http
+GET /dashboard
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "cash_balance": 125000.50,
+    "daily_sales": {
+      "total": 15000.00,
+      "by_warehouse": [
+        {"warehouse": "oraby", "total": 8000.00},
+        {"warehouse": "giza", "total": 7000.00}
+      ]
+    },
+    "weekly_sales": {...},
+    "monthly_sales": {...},
+    "profit_margin": 35.5,
+    "currency": "EGP"
+  }
+}
+```
+
+### 5.3 Settings
+
+#### **Get Settings**
+```http
+GET /settings
+Authorization: Bearer {token}
+```
+
+#### **Update Settings**
+```http
+POST /settings
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "currency": "USD",
+  "main_vault": 3,
+  "report_emails": ["admin@example.com", "finance@example.com"],
+  "report_types": ["daily", "weekly", "monthly"]
+}
+```
+
+### 5.4 Expenses
+
+#### **List Expenses**
+```http
+GET /expenses?page=1&per_page=20
+Authorization: Bearer {token}
+```
+
+**Query Parameters:**
+- `page` (int): Page number (default: 1)
+- `per_page` (int): Results per page (default: 20, max: 100)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 15,
+      "type": "variable",
+      "category_id": 5,
+      "category_name": "Office Supplies",
+      "amount": "1500.00",
+      "description": "Printer paper and ink",
+      "warehouse": "oraby",
+      "vault_id": 2,
+      "vault_name": "Cash Vault - Oraby",
+      "employee_id": 10,
+      "employee_name": "Mohamed Hassan",
+      "created_at": "2025-11-10 14:30:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 20,
+    "total": 150,
+    "total_pages": 8
+  }
+}
+```
+
+#### **Create Expense**
+```http
+POST /expenses
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "type": "variable",
+  "category_id": 5,
+  "amount": 1500.00,
+  "description": "Office supplies",
+  "warehouse": "oraby",
+  "vault_id": 2,
+  "employee_id": 10,
+  "allow_negative_balance": false
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Expense created successfully",
+  "data": {
+    "id": 151
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "code": "insufficient_balance",
+  "message": "Insufficient vault balance",
+  "data": {
+    "status": 400
+  }
+}
+```
+
+#### **Get Single Expense**
+```http
+GET /expenses/15
+Authorization: Bearer {token}
+```
+
+#### **Update Expense**
+```http
+PUT /expenses/15
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "amount": 1600.00,
+  "description": "Office supplies - updated"
+}
+```
+
+#### **Delete Expense**
+```http
+DELETE /expenses/15
+Authorization: Bearer {token}
+```
+
+### 5.5 Expense Categories
+
+#### **List Categories**
+```http
+GET /expense-categories
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "Raw Materials",
+      "description": "Materials for production",
+      "created_at": "2025-01-01 00:00:00"
+    },
+    {
+      "id": 2,
+      "name": "Utilities",
+      "description": "Electricity, water, internet",
+      "created_at": "2025-01-01 00:00:00"
+    }
+  ]
+}
+```
+
+#### **Create Category**
+```http
+POST /expense-categories
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "Marketing",
+  "description": "Marketing and advertising expenses"
+}
+```
+
+#### **Update Category**
+```http
+PUT /expense-categories/5
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "Digital Marketing",
+  "description": "Online marketing campaigns"
+}
+```
+
+#### **Delete Category**
+```http
+DELETE /expense-categories/5
+Authorization: Bearer {token}
+```
+
+### 5.6 Vaults
+
+#### **List Vaults**
+```http
+GET /vaults
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "Cash Vault - Oraby",
+      "payment_method": "cash",
+      "balance": "125000.50",
+      "commission_rate": "0.00",
+      "default_warehouse": "oraby",
+      "employees": "[5,10,15]",
+      "is_default": 1,
+      "created_at": "2025-01-01 00:00:00"
+    },
+    {
+      "id": 2,
+      "name": "Vodafone Cash Vault",
+      "payment_method": "vodafone_cash",
+      "balance": "50000.00",
+      "commission_rate": "2.50",
+      "default_warehouse": null,
+      "employees": "[]",
+      "is_default": 1,
+      "created_at": "2025-01-01 00:00:00"
+    }
+  ]
+}
+```
+
+#### **Create Vault**
+```http
+POST /vaults
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "Bank Transfer Vault",
+  "payment_method": "bank_transfer",
+  "balance": 0,
+  "commission_rate": 1.5,
+  "default_warehouse": "giza",
+  "employees": [5, 10],
+  "is_default": 1
+}
+```
+
+**Payment Methods:**
+- `cash` - Cash on delivery / Cash payments
+- `cod` - Cash on delivery (alias)
+- `bank_transfer` - Bank transfers
+- `card` - Card payments
+- `vodafone_cash` - Vodafone Cash
+- Custom payment methods supported
+
+#### **Transfer Between Vaults**
+```http
+POST /vaults/transfer
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "from_vault_id": 1,
+  "to_vault_id": 2,
+  "amount": 5000.00,
+  "employee_id": 10,
+  "allow_negative_balance": false
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Transfer completed successfully"
+}
+```
+
+### 5.7 Vendors
+
+#### **List Vendors**
+```http
+GET /vendors
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1,
+      "name": "ABC Suppliers",
+      "phone": "0101234567",
+      "address": "123 Main St, Cairo",
+      "material_ids": "[10,15,20]",
+      "payment_methods": "[\"cash\",\"bank_transfer\"]",
+      "balance": "25000.00",
+      "created_at": "2025-01-01 00:00:00"
+    }
+  ]
+}
+```
+
+#### **Create Vendor**
+```http
+POST /vendors
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "name": "XYZ Trading",
+  "phone": "0109876543",
+  "address": "456 Commerce St, Giza",
+  "material_ids": [25, 30],
+  "payment_methods": ["cash", "credit"]
+}
+```
+
+### 5.8 Purchases
+
+#### **List Purchases**
+```http
+GET /purchases?page=1&per_page=20
+Authorization: Bearer {token}
+```
+
+#### **Create Purchase**
+```http
+POST /purchases
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "material_id": 15,
+  "vendor_id": 3,
+  "quantity": 100,
+  "unit_cost": 50.00,
+  "vault_id": 1,
+  "employee_id": 10,
+  "allow_negative_balance": false
+}
+```
+
+**Auto Calculations:**
+- `total_cost = quantity × unit_cost`
+- Vault balance automatically decreased
+- Vendor balance automatically increased
+- Material stock automatically updated (if FMS plugin active)
+- Cashflow automatically recorded
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Purchase created successfully",
+  "data": {
+    "id": 45
+  }
+}
+```
+
+### 5.9 Payroll
+
+#### **Get Payroll Data**
+```http
+GET /payroll?month=2025-11
+Authorization: Bearer {token}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 100,
+      "employee_id": 5,
+      "name": "Ahmed Ali",
+      "month": "2025-11",
+      "base_salary": "5000.00",
+      "bonuses": "500.00",
+      "deductions": "200.00",
+      "advances": "0.00",
+      "final_salary": "5300.00",
+      "status": "unpaid"
+    }
+  ]
+}
+```
+
+#### **Pay Salary**
+```http
+POST /payroll/pay
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "salary_id": 100,
+  "vault_id": 1,
+  "employee_id": 5,
+  "allow_negative_balance": false
+}
+```
+
+**Process:**
+1. Marks salary as `paid` in SHRMS
+2. Deducts from vault
+3. Records cashflow
+4. Returns confirmation
+
+### 5.10 Loans
+
+#### **List Company Loans**
+```http
+GET /company-loans?page=1&per_page=20&status=active
+Authorization: Bearer {token}
+```
+
+**Query Parameters:**
+- `status`: `active`, `completed`, `defaulted`
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 5,
+      "lender_name": "National Bank",
+      "receiver_employee_id": 10,
+      "receiver_name": "Mohamed Hassan",
+      "vault_id": 1,
+      "vault_name": "Cash Vault",
+      "loan_amount": "100000.00",
+      "repayment_type": "installments",
+      "installment_amount": "5000.00",
+      "installment_period": 20,
+      "installment_frequency": "monthly",
+      "total_paid": "15000.00",
+      "remaining_balance": "85000.00",
+      "loan_date": "2025-01-15",
+      "due_date": "2026-09-15",
+      "next_payment_date": "2025-12-01",
+      "reason": "Business expansion",
+      "status": "active",
+      "created_at": "2025-01-15 10:00:00"
+    }
+  ],
+  "pagination": {...}
+}
+```
+
+#### **Create Company Loan**
+```http
+POST /company-loans
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "lender_name": "National Bank",
+  "receiver_employee_id": 10,
+  "vault_id": 1,
+  "loan_amount": 100000.00,
+  "repayment_type": "installments",
+  "installment_amount": 5000.00,
+  "installment_period": 20,
+  "installment_frequency": "monthly",
+  "loan_date": "2025-11-11",
+  "reason": "Business expansion"
+}
+```
+
+**Auto Process:**
+- Adds loan amount to vault (company receives money)
+- Records revenue cashflow
+- Calculates `next_payment_date` and `due_date`
+
+#### **List Employee Loans**
+```http
+GET /employee-loans?employee_id=5&status=active
+Authorization: Bearer {token}
+```
+
+#### **Create Employee Loan**
+```http
+POST /employee-loans
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "employee_id": 5,
+  "vault_id": 1,
+  "loan_amount": 10000.00,
+  "repayment_type": "installments",
+  "installment_amount": 1000.00,
+  "installment_period": 10,
+  "installment_frequency": "monthly",
+  "auto_deduct_from_salary": 1,
+  "loan_date": "2025-11-11",
+  "reason": "Personal emergency"
+}
+```
+
+**Validation:**
+- Checks if `installment_amount ≤ 50% of employee salary`
+- Checks if vault has sufficient balance
+- If `auto_deduct_from_salary=1`, deduction happens automatically on salary calculation
+
+#### **List Loan Payments**
+```http
+GET /loan-payments?loan_id=5&loan_type=employee
+Authorization: Bearer {token}
+```
+
+#### **Create Loan Payment**
+```http
+POST /loan-payments
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "loan_id": 5,
+  "loan_type": "employee",
+  "payment_amount": 1000.00,
+  "payment_date": "2025-11-11",
+  "vault_id": 1,
+  "employee_id": 5,
+  "salary_month": "2025-11",
+  "notes": "Monthly installment"
+}
+```
+
+**Auto Process:**
+- Updates loan `remaining_balance`
+- Updates loan `total_paid`
+- Changes status to `completed` if fully paid
+- Calculates next payment date
+- For company loans: decreases vault (company paying)
+- For employee loans: increases vault (employee paying)
+- Records cashflow
+
+### 5.11 Reports
+
+#### **Get Financial Reports**
+```http
+GET /reports?period=month
+Authorization: Bearer {token}
+```
+
+**Query Parameters:**
+- `period`: `day`, `week`, `month`
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "period": "month",
+    "sales_report": {
+      "by_warehouse": [
+        {"warehouse": "oraby", "total": "250000.00"},
+        {"warehouse": "giza", "total": "180000.00"}
+      ],
+      "total": "430000.00"
+    },
+    "profit_margin": 35.5,
+    "currency": "EGP"
+  }
+}
+```
+
+### 5.12 Cashflow
+
+#### **Get Cashflow History**
+```http
+GET /cashflow?type=revenue&page=1&per_page=50
+Authorization: Bearer {token}
+```
+
+**Query Parameters:**
+- `type`: `revenue`, `expense`, or omit for all
+- `page`, `per_page`: Pagination
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": 1500,
+      "type": "revenue",
+      "category_id": null,
+      "category_name": null,
+      "amount": "1500.00",
+      "description": "WooCommerce Order #12345 from oraby warehouse",
+      "related_id": 12345,
+      "related_type": "order",
+      "warehouse": "oraby",
+      "payment_method": "cash",
+      "vault_id": 1,
+      "vault_name": "Cash Vault - Oraby",
+      "employee_id": 10,
+      "employee_name": "Mohamed Hassan",
+      "order_id": 12345,
+      "created_at": "2025-11-11 15:30:00"
+    }
+  ],
+  "pagination": {...}
+}
+```
+
+### 5.13 Auto Salary Deductions
+
+#### **Process Salary Deductions**
+```http
+POST /process-salary-deductions
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "salary_month": "2025-11"
+}
+```
+
+**Process:**
+- Finds all employee loans with `auto_deduct_from_salary=1`
+- Checks if `next_payment_date ≤ salary_month`
+- Deducts installment amount
+- Updates SHRMS salary `deductions` field
+- Records loan payment
+- Updates vault balance
+- Records cashflow
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Processed 5 deductions",
+  "data": {
+    "processed": 5,
+    "errors": []
+  }
+}
+```
+
+### 5.14 Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `missing_token` | 401 | Authorization header missing |
+| `invalid_token` | 403 | Token invalid or expired |
+| `insufficient_permissions` | 403 | User role not authorized |
+| `missing_field` | 400 | Required field missing |
+| `invalid_input` | 400 | Input validation failed |
+| `not_found` | 404 | Resource not found |
+| `insufficient_balance` | 400 | Vault balance insufficient |
+| `db_error` | 500 | Database operation failed |
+
+
+
+# 📘 **FFA Plugin Documentation - Part 2**
+
+---
+
+## 6. Admin Interface
+
+### 6.1 Dashboard Page
+
+**URL:** `/wp-admin/admin.php?page=ffa-dashboard`
+
+**Features:**
+- Real-time cash balance display
+- Daily/Weekly/Monthly sales statistics
+- Profit margin calculation
+- Sales breakdown by warehouse
+- Quick action buttons
+
+**Programmatic Access:**
+```php
+// Get dashboard data programmatically
+$main_vault_id = get_option('ffa_main_vault', 0);
+$cash_balance = $wpdb->get_var($wpdb->prepare(
+    "SELECT balance FROM {$wpdb->prefix}ffa_vaults WHERE id = %d", 
+    $main_vault_id
+));
+
+$daily_sales = FFA_Database::get_sales_report('day');
+$profit_margin = FFA_Database::calculate_profit_margin('month');
+```
+
+### 6.2 Expenses Management
+
+**URL:** `/wp-admin/admin.php?page=ffa-expenses`
+
+**Features:**
+- Add new expenses with validation
+- List expenses with pagination
+- Filter by category/warehouse
+- Delete expenses
+- Real-time vault balance checking
+
+### 6.3 Vaults Management
+
+**URL:** `/wp-admin/admin.php?page=ffa-vaults`
+
+**Tabs:**
+1. **Vaults List** - View all vaults with balances
+2. **Add Vault** - Create new vault with commission settings
+3. **Transfer Money** - Move funds between vaults
+
+**Commission Feature:**
+```php
+// When creating vault with commission
+$vault_data = [
+    'name' => 'Vodafone Cash',
+    'payment_method' => 'vodafone_cash',
+    'commission_rate' => 2.5, // 2.5%
+    'balance' => 0
+];
+
+// On revenue: Amount × (100 - commission_rate) / 100
+// Example: 1000 EGP revenue with 2.5% commission
+// Net to vault: 1000 × 97.5% = 975 EGP
+// Commission expense: 25 EGP
+```
+
+### 6.4 Vendors Management
+
+**URL:** `/wp-admin/admin.php?page=ffa-vendors`
+
+**Features:**
+- Add vendors with contact info
+- Link materials to vendors
+- Track vendor balances
+- Manage payment methods per vendor
+
+### 6.5 Purchases Management
+
+**URL:** `/wp-admin/admin.php?page=ffa-purchases`
+
+**Auto Integration:**
+- Material stock update (FMS plugin)
+- Vendor balance update
+- Vault balance deduction
+- Cashflow recording
+
+### 6.6 Loans Management
+
+**URL:** `/wp-admin/admin.php?page=ffa-loans`
+
+**Tabs:**
+1. **Employee Loans** - Loans given to employees
+2. **Company Loans** - Loans taken by company
+
+**Smart Features:**
+- 50% salary limit validation for employee loans
+- Auto-deduction scheduling
+- Installment calculator
+- Next payment date tracking
+
+### 6.7 Payroll Page
+
+**URL:** `/wp-admin/admin.php?page=ffa-payroll`
+
+**Integration:** Reads from SHRMS plugin
+**Features:**
+- Monthly payroll summary
+- Paid/Unpaid status
+- Total payroll calculation
+- Quick pay functionality (future)
+
+### 6.8 Reports Page
+
+**URL:** `/wp-admin/admin.php?page=ffa-reports`
+
+**Report Types:**
+- Sales by warehouse
+- Profit margin analysis
+- Period comparison (day/week/month)
+- Visual statistics
+
+### 6.9 Cashflow History
+
+**URL:** `/wp-admin/admin.php?page=ffa-cashflow`
+
+**Features:**
+- Complete transaction history
+- Filter by type (revenue/expense)
+- Pagination (50 per page)
+- Search functionality
+- Export capability (future)
+
+### 6.10 Settings Page
+
+**URL:** `/wp-admin/admin.php?page=ffa-settings`
+
+**Available Settings:**
+```php
+// Currency
+update_option('ffa_currency', 'EGP'); // EGP, USD, EUR, GBP, SAR
+
+// Main Vault (for dashboard display)
+update_option('ffa_main_vault', 1);
+
+// Report Email Recipients
+update_option('ffa_report_emails', ['admin@example.com', 'finance@example.com']);
+
+// Report Types (for auto-sending)
+update_option('ffa_report_types', ['daily', 'weekly', 'monthly']);
+```
+
+***
+
+## 7. WooCommerce Integration
+
+### 7.1 Order Status Hooks
+
+**Automatic Processing:**
+
+```php
+// Order completed → Add revenue to vault
+add_action('woocommerce_order_status_completed', [FFA_WooCommerce, 'handle_order_completed']);
+
+// Order cancelled → Reverse transaction
+add_action('woocommerce_order_status_cancelled', [FFA_WooCommerce, 'handle_order_cancelled']);
+
+// Order refunded → Reverse transaction
+add_action('woocommerce_order_status_refunded', [FFA_WooCommerce, 'handle_order_refunded']);
+
+// Partial refund → Deduct partial amount
+add_action('woocommerce_order_refunded', [FFA_WooCommerce, 'handle_partial_refund']);
+```
+
+### 7.2 Order Completion Process
+
+**Flow:**
+```
+Order Completed
+    ↓
+1. Get warehouse (from order meta: _selected_warehouse)
+2. Get payment method (from order)
+3. Find/Create appropriate vault
+4. Calculate commission (if vault has commission_rate)
+5. Update vault balance (amount - commission)
+6. Record commission as expense
+7. Record revenue cashflow
+8. Log transaction
+```
+
+**Code Example:**
+```php
+public static function handle_order_completed($order_id) {
+    global $wpdb;
+    
+    $order = wc_get_order($order_id);
+    $warehouse = get_post_meta($order_id, '_selected_warehouse', true) ?: 'default';
+    $payment_method = $order->get_payment_method();
+    $amount = $order->get_total();
+    
+    // Find vault
+    $vault = FFA_Database::find_vault($warehouse, $payment_method);
+    
+    // Update with commission
+    $net_amount = FFA_Database::update_vault_balance(
+        $vault->id,
+        $amount,
+        "WooCommerce Order #$order_id",
+        $order_id,
+        'order',
+        $warehouse,
+        get_current_user_id(),
+        true // apply commission
+    );
+    
+    // Record cashflow
+    FFA_Database::record_cashflow(
+        'revenue',
+        null,
+        $net_amount,
+        "Order #$order_id from $warehouse",
+        $order_id,
+        'order',
+        $warehouse,
+        $payment_method,
+        $vault->id,
+        get_current_user_id()
+    );
+}
+```
+
+### 7.3 Vault Routing Logic
+
+**Smart Vault Selection:**
+```php
+public static function find_vault($warehouse, $payment_method) {
+    // Priority 1: Exact match (warehouse + payment_method)
+    $vault = get_vault_by_warehouse_and_payment($warehouse, $payment_method);
+    
+    // Priority 2: Default vault for payment method
+    if (!$vault) {
+        $vault = get_default_vault_by_payment($payment_method);
+    }
+    
+    // Priority 3: Any vault for payment method
+    if (!$vault) {
+        $vault = get_any_vault_by_payment($payment_method);
+    }
+    
+    // Priority 4: Create new vault
+    if (!$vault) {
+        $vault = create_vault($warehouse, $payment_method);
+    }
+    
+    return $vault;
+}
+```
+
+### 7.4 Commission Handling
+
+**Example:**
+```php
+// Vodafone Cash vault with 2.5% commission
+$vault->commission_rate = 2.5;
+
+// Order total: 1000 EGP
+$order_total = 1000.00;
+
+// Calculate commission
+$commission = ($order_total * 2.5) / 100; // 25 EGP
+
+// Net amount to vault
+$net_amount = $order_total - $commission; // 975 EGP
+
+// Update vault
+$vault->balance += 975;
+
+// Record commission expense
+insert_expense([
+    'type' => 'variable',
+    'category' => 'Commission',
+    'amount' => 25,
+    'description' => 'Vodafone Cash commission for Order #12345'
+]);
+```
+
+### 7.5 Refund Handling
+
+**Full Refund:**
+```php
+// Order status changed to 'refunded'
+// Automatically reverses the transaction:
+// 1. Deduct from vault
+// 2. Record expense cashflow
+// 3. Mark as refunded
+```
+
+**Partial Refund:**
+```php
+// Refund object created in WooCommerce
+// Amount: 200 EGP from 1000 EGP order
+// Process:
+// 1. Get refund amount
+// 2. Deduct from original vault
+// 3. Record partial refund cashflow
+// 4. Original order stays 'completed'
+```
+
+***
+
+## 8. Hooks & Filters
+
+### 8.1 Available Actions
+
+```php
+// After plugin activation
+do_action('ffa_activated');
+
+// After database tables created
+do_action('ffa_tables_created');
+
+// Before expense created
+do_action('ffa_before_create_expense', $expense_data);
+
+// After expense created
+do_action('ffa_after_create_expense', $expense_id, $expense_data);
+
+// Before vault balance update
+do_action('ffa_before_update_vault', $vault_id, $amount, $description);
+
+// After vault balance update
+do_action('ffa_after_update_vault', $vault_id, $new_balance, $old_balance);
+
+// Before cashflow record
+do_action('ffa_before_record_cashflow', $cashflow_data);
+
+// After cashflow record
+do_action('ffa_after_record_cashflow', $cashflow_id, $cashflow_data);
+
+// After order processed
+do_action('ffa_order_processed', $order_id, $vault_id, $amount);
+
+// After salary paid
+do_action('ffa_salary_paid', $salary_id, $vault_id, $amount);
+
+// After loan created
+do_action('ffa_loan_created', $loan_id, $loan_type, $loan_data);
+
+// After loan payment
+do_action('ffa_loan_payment_made', $payment_id, $loan_id, $loan_type, $amount);
+
+// Before auto salary deduction
+do_action('ffa_before_salary_deduction', $employee_id, $loan_id, $amount);
+
+// After auto salary deduction
+do_action('ffa_after_salary_deduction', $employee_id, $loan_id, $amount, $success);
+```
+
+### 8.2 Available Filters
+
+```php
+// Modify vault before creation
+apply_filters('ffa_vault_data', $vault_data);
+
+// Modify commission rate
+apply_filters('ffa_commission_rate', $rate, $vault_id, $payment_method);
+
+// Modify expense data before save
+apply_filters('ffa_expense_data', $expense_data);
+
+// Modify cashflow description
+apply_filters('ffa_cashflow_description', $description, $type, $related_type);
+
+// Modify vault selection
+apply_filters('ffa_selected_vault', $vault, $warehouse, $payment_method);
+
+// Modify profit margin calculation
+apply_filters('ffa_profit_margin', $margin, $period);
+
+// Modify sales report data
+apply_filters('ffa_sales_report', $report_data, $period);
+
+// Modify max installment percentage (default 50%)
+apply_filters('ffa_max_installment_percentage', 50, $employee_id);
+
+// Modify auto deduction enabled
+apply_filters('ffa_auto_deduction_enabled', true, $employee_id, $loan_id);
+
+// Modify currency symbol
+apply_filters('ffa_currency_symbol', 'EGP', $currency_code);
+```
+
+### 8.3 Usage Examples
+
+**Example 1: Send notification on expense creation**
+```php
+add_action('ffa_after_create_expense', function($expense_id, $expense_data) {
+    if ($expense_data['amount'] > 5000) {
+        // Send email to admin
+        wp_mail(
+            get_option('admin_email'),
+            'Large Expense Alert',
+            "Expense #{$expense_id} of {$expense_data['amount']} EGP created"
+        );
+    }
+}, 10, 2);
+```
+
+**Example 2: Apply dynamic commission based on amount**
+```php
+add_filter('ffa_commission_rate', function($rate, $vault_id, $payment_method) {
+    // Higher commission for card payments
+    if ($payment_method === 'card') {
+        return 3.5; // 3.5% for cards
+    }
+    return $rate;
+}, 10, 3);
+```
+
+**Example 3: Custom vault selection logic**
+```php
+add_filter('ffa_selected_vault', function($vault, $warehouse, $payment_method) {
+    // Route all Giza orders to specific vault
+    if ($warehouse === 'giza' && $payment_method === 'cash') {
+        global $wpdb;
+        return $wpdb->get_row("SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = 5");
+    }
+    return $vault;
+}, 10, 3);
+```
+
+**Example 4: Log all cashflow to external system**
+```php
+add_action('ffa_after_record_cashflow', function($cashflow_id, $cashflow_data) {
+    // Send to external API
+    wp_remote_post('https://external-api.com/log', [
+        'body' => json_encode([
+            'id' => $cashflow_id,
+            'type' => $cashflow_data['type'],
+            'amount' => $cashflow_data['amount'],
+            'timestamp' => current_time('timestamp')
+        ])
+    ]);
+}, 10, 2);
+```
+
+**Example 5: Modify employee loan limit**
+```php
+add_filter('ffa_max_installment_percentage', function($percentage, $employee_id) {
+    // Senior employees can have 60% deduction
+    $employee = get_employee($employee_id);
+    if ($employee->role === 'senior_manager') {
+        return 60;
+    }
+    return $percentage;
+}, 10, 2);
+```
+
+***
+
+## 9. Code Examples
+
+### 9.1 Basic Operations
+
+#### **Create Expense Programmatically**
+```php
+global $wpdb;
+
+// Get vault and validate balance
+$vault = $wpdb->get_row($wpdb->prepare(
+    "SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = %d", 
+    2
+));
+
+$expense_amount = 1500.00;
+
+if ($vault->balance >= $expense_amount) {
+    $wpdb->query('START TRANSACTION');
+    
+    try {
+        // Insert expense
+        $wpdb->insert($wpdb->prefix . 'ffa_expenses', [
+            'type' => 'variable',
+            'category_id' => 5,
+            'amount' => $expense_amount,
+            'description' => 'Office supplies',
+            'warehouse' => 'oraby',
+            'vault_id' => 2,
+            'employee_id' => 10,
+            'created_at' => current_time('mysql'),
+            'created_by' => get_current_user_id()
+        ]);
+        
+        $expense_id = $wpdb->insert_id;
+        
+        // Update vault
+        $wpdb->update(
+            $wpdb->prefix . 'ffa_vaults',
+            ['balance' => $vault->balance - $expense_amount],
+            ['id' => 2]
+        );
+        
+        // Record cashflow
+        FFA_Database::record_cashflow(
+            'expense',
+            5,
+            $expense_amount,
+            'Office supplies purchase',
+            $expense_id,
+            'expense',
+            'oraby',
+            $vault->payment_method,
+            2,
+            10
+        );
+        
+        $wpdb->query('COMMIT');
+        FFA_Database::clear_cache();
+        
+        echo "Expense created successfully: #$expense_id";
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        echo "Error: " . $e->getMessage();
+    }
+}
+```
+
+#### **Get Financial Summary**
+```php
+// Get total revenue this month
+global $wpdb;
+
+$revenue = $wpdb->get_var("
+    SELECT SUM(amount) 
+    FROM {$wpdb->prefix}ffa_cashflow 
+    WHERE type = 'revenue' 
+    AND MONTH(created_at) = MONTH(NOW())
+    AND YEAR(created_at) = YEAR(NOW())
+");
+
+// Get total expenses this month
+$expenses = $wpdb->get_var("
+    SELECT SUM(amount) 
+    FROM {$wpdb->prefix}ffa_cashflow 
+    WHERE type = 'expense' 
+    AND MONTH(created_at) = MONTH(NOW())
+    AND YEAR(created_at) = YEAR(NOW())
+");
+
+// Calculate profit
+$profit = $revenue - $expenses;
+$profit_margin = ($revenue > 0) ? ($profit / $revenue) * 100 : 0;
+
+echo "Revenue: " . number_format($revenue, 2) . " EGP\n";
+echo "Expenses: " . number_format($expenses, 2) . " EGP\n";
+echo "Profit: " . number_format($profit, 2) . " EGP\n";
+echo "Margin: " . number_format($profit_margin, 1) . "%\n";
+```
+
+#### **Create Employee Loan with Auto Deduction**
+```php
+global $wpdb;
+
+$employee_id = 5;
+$loan_amount = 10000.00;
+$installment_amount = 1000.00;
+
+// Get employee salary
+$employee = $wpdb->get_row($wpdb->prepare(
+    "SELECT * FROM {$wpdb->prefix}shrms_employees WHERE id = %d",
+    $employee_id
+));
+
+// Validate 50% rule
+if ($installment_amount > ($employee->salary * 0.5)) {
+    die("Error: Installment exceeds 50% of salary");
+}
+
+// Create loan
+$wpdb->insert($wpdb->prefix . 'ffa_employee_loans', [
+    'employee_id' => $employee_id,
+    'vault_id' => 1,
+    'loan_amount' => $loan_amount,
+    'repayment_type' => 'installments',
+    'installment_amount' => $installment_amount,
+    'installment_period' => 10,
+    'installment_frequency' => 'monthly',
+    'auto_deduct_from_salary' => 1,
+    'remaining_balance' => $loan_amount,
+    'loan_date' => current_time('mysql'),
+    'next_payment_date' => date('Y-m-01', strtotime('+1 month')),
+    'reason' => 'Personal emergency',
+    'status' => 'active',
+    'created_at' => current_time('mysql'),
+    'created_by' => get_current_user_id()
+]);
+
+$loan_id = $wpdb->insert_id;
+echo "Loan created: #$loan_id with auto-deduction enabled";
+```
+
+### 9.2 Advanced Operations
+
+#### **Bulk Transfer Between Vaults**
+```php
+function bulk_vault_transfer($transfers) {
+    global $wpdb;
+    
+    $wpdb->query('START TRANSACTION');
+    $wpdb->query('SET FOREIGN_KEY_CHECKS=0');
+    
+    try {
+        foreach ($transfers as $transfer) {
+            $from_vault = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = %d",
+                $transfer['from']
+            ));
+            
+            $to_vault = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = %d",
+                $transfer['to']
+            ));
+            
+            if (!$from_vault || !$to_vault) {
+                throw new Exception("Invalid vault");
+            }
+            
+            $amount = floatval($transfer['amount']);
+            
+            if ($from_vault->balance < $amount) {
+                throw new Exception("Insufficient balance in vault {$from_vault->name}");
+            }
+            
+            // Update balances
+            $wpdb->update(
+                $wpdb->prefix . 'ffa_vaults',
+                ['balance' => $from_vault->balance - $amount],
+                ['id' => $from_vault->id]
+            );
+            
+            $wpdb->update(
+                $wpdb->prefix . 'ffa_vaults',
+                ['balance' => $to_vault->balance + $amount],
+                ['id' => $to_vault->id]
+            );
+            
+            // Record cashflow
+            FFA_Database::record_cashflow(
+                'expense',
+                null,
+                $amount,
+                "Bulk transfer to {$to_vault->name}",
+                $from_vault->id,
+                'vault_transfer',
+                null,
+                $from_vault->payment_method,
+                $from_vault->id,
+                get_current_user_id()
+            );
+            
+            FFA_Database::record_cashflow(
+                'revenue',
+                null,
+                $amount,
+                "Bulk transfer from {$from_vault->name}",
+                $to_vault->id,
+                'vault_transfer',
+                null,
+                $to_vault->payment_method,
+                $to_vault->id,
+                get_current_user_id()
+            );
+        }
+        
+        $wpdb->query('SET FOREIGN_KEY_CHECKS=1');
+        $wpdb->query('COMMIT');
+        FFA_Database::clear_cache();
+        
+        return ['success' => true, 'transferred' => count($transfers)];
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+// Usage
+$result = bulk_vault_transfer([
+    ['from' => 1, 'to' => 2, 'amount' => 5000],
+    ['from' => 1, 'to' => 3, 'amount' => 3000],
+    ['from' => 2, 'to' => 4, 'amount' => 2000]
+]);
+```
+
+#### **Generate Custom Report**
+```php
+function generate_custom_report($start_date, $end_date, $warehouse = null) {
+    global $wpdb;
+    
+    $where = "WHERE created_at BETWEEN %s AND %s";
+    $params = [$start_date, $end_date];
+    
+    if ($warehouse) {
+        $where .= " AND warehouse = %s";
+        $params[] = $warehouse;
+    }
+    
+    // Revenue
+    $revenue_query = "
+        SELECT SUM(amount) as total, payment_method
+        FROM {$wpdb->prefix}ffa_cashflow
+        $where AND type = 'revenue'
+        GROUP BY payment_method
+    ";
+    $revenue = $wpdb->get_results($wpdb->prepare($revenue_query, ...$params));
+    
+    // Expenses by category
+    $expense_query = "
+        SELECT SUM(c.amount) as total, cat.name as category
+        FROM {$wpdb->prefix}ffa_cashflow c
+        LEFT JOIN {$wpdb->prefix}ffa_expense_categories cat ON c.category_id = cat.id
+        $where AND c.type = 'expense'
+        GROUP BY cat.name
+    ";
+    $expenses = $wpdb->get_results($wpdb->prepare($expense_query, ...$params));
+    
+    // Top products sold (from WooCommerce)
+    $products_query = "
+        SELECT p.post_title, SUM(oim_qty.meta_value) as quantity, SUM(oim_total.meta_value) as total
+        FROM {$wpdb->prefix}posts ord
+        JOIN {$wpdb->prefix}woocommerce_order_items oi ON ord.ID = oi.order_id
+        JOIN {$wpdb->prefix}woocommerce_order_itemmeta oim_prod ON oi.order_item_id = oim_prod.order_item_id
+        JOIN {$wpdb->prefix}posts p ON oim_prod.meta_value = p.ID
+        LEFT JOIN {$wpdb->prefix}woocommerce_order_itemmeta oim_qty ON oi.order_item_id = oim_qty.order_item_id AND oim_qty.meta_key = '_qty'
+        LEFT JOIN {$wpdb->prefix}woocommerce_order_itemmeta oim_total ON oi.order_item_id = oim_total.order_item_id AND oim_total.meta_key = '_line_total'
+        WHERE ord.post_type = 'shop_order'
+        AND ord.post_status = 'wc-completed'
+        AND ord.post_date BETWEEN %s AND %s
+        AND oim_prod.meta_key = '_product_id'
+        GROUP BY p.ID
+        ORDER BY total DESC
+        LIMIT 10
+    ";
+    $top_products = $wpdb->get_results($wpdb->prepare($products_query, $start_date, $end_date));
+    
+    return [
+        'period' => [
+            'start' => $start_date,
+            'end' => $end_date,
+            'warehouse' => $warehouse ?: 'All'
+        ],
+        'revenue' => $revenue,
+        'expenses' => $expenses,
+        'top_products' => $top_products,
+        'total_revenue' => array_sum(array_column($revenue, 'total')),
+        'total_expenses' => array_sum(array_column($expenses, 'total'))
+    ];
+}
+
+// Usage
+$report = generate_custom_report('2025-11-01', '2025-11-30', 'oraby');
+print_r($report);
+```
+
+### 9.3 Integration Examples
+
+#### **Integrate with External Accounting System**
+```php
+// Send cashflow to external API
+add_action('ffa_after_record_cashflow', function($cashflow_id, $cashflow_data) {
+    $api_endpoint = 'https://accounting-system.com/api/transactions';
+    $api_key = get_option('external_accounting_api_key');
+    
+    $payload = [
+        'transaction_id' => $cashflow_id,
+        'type' => $cashflow_data['type'],
+        'amount' => $cashflow_data['amount'],
+        'description' => $cashflow_data['description'],
+        'date' => $cashflow_data['created_at'],
+        'category' => $cashflow_data['category_id'],
+        'vault' => $cashflow_data['vault_id']
+    ];
+    
+    wp_remote_post($api_endpoint, [
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type' => 'application/json'
+        ],
+        'body' => json_encode($payload),
+        'timeout' => 15
+    ]);
+}, 10, 2);
+```
+
+#### **Sync with Google Sheets**
+```php
+function sync_to_google_sheets($cashflow_id) {
+    global $wpdb;
+    
+    $cashflow = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}ffa_cashflow WHERE id = %d",
+        $cashflow_id
+    ));
+    
+    $spreadsheet_id = get_option('ffa_google_sheet_id');
+    $service_account = json_decode(get_option('ffa_google_service_account'), true);
+    
+    // Use Google Sheets API
+    $client = new Google_Client();
+    $client->setAuthConfig($service_account);
+    $client->addScope(Google_Service_Sheets::SPREADSHEETS);
+    
+    $service = new Google_Service_Sheets($client);
+    
+    $values = [[
+        $cashflow->id,
+        $cashflow->type,
+        $cashflow->amount,
+        $cashflow->description,
+        $cashflow->created_at
+    ]];
+    
+    $body = new Google_Service_Sheets_ValueRange(['values' => $values]);
+    
+    $service->spreadsheets_values->append(
+        $spreadsheet_id,
+        'Cashflow!A:E',
+        $body,
+        ['valueInputOption' => 'RAW']
+    );
+}
+
+add_action('ffa_after_record_cashflow', 'sync_to_google_sheets', 10, 1);
+```
+
+***
+
+## 10. Best Practices & Performance Optimization
+
+### 10.1 API Speed Optimization
+
+#### **1. Enable Caching**
+```php
+// Database class already implements caching
+// Manual cache usage:
+
+// Get from cache
+$vaults = FFA_Database::get_vaults(); // Cached for 1 hour
+
+// Force refresh
+$vaults = FFA_Database::get_vaults(true);
+
+// Clear all caches after updates
+FFA_Database::clear_cache();
+```
+
+#### **2. Use Indexes Properly**
+```sql
+-- Already implemented in tables:
+-- All foreign keys have indexes
+-- created_at has index for date queries
+-- type has index for filtering
+-- order_id has index for WooCommerce integration
+
+-- Check if indexes are used:
+EXPLAIN SELECT * FROM wp_ffa_cashflow 
+WHERE type = 'revenue' 
+AND created_at > '2025-11-01';
+```
+
+#### **3. Batch Operations**
+```php
+// Instead of multiple single inserts:
+// ❌ BAD
+foreach ($expenses as $expense) {
+    $wpdb->insert($wpdb->prefix . 'ffa_expenses', $expense);
+}
+
+// ✅ GOOD - Use bulk insert
+$values = [];
+foreach ($expenses as $expense) {
+    $values[] = $wpdb->prepare(
+        "(%s, %d, %f, %s, %s, %d, %d, %s, %d)",
+        $expense['type'],
+        $expense['category_id'],
+        $expense['amount'],
+        $expense['description'],
+        $expense['warehouse'],
+        $expense['vault_id'],
+        $expense['employee_id'],
+        current_time('mysql'),
+        get_current_user_id()
+    );
+}
+
+$wpdb->query("
+    INSERT INTO {$wpdb->prefix}ffa_expenses 
+    (type, category_id, amount, description, warehouse, vault_id, employee_id, created_at, created_by)
+    VALUES " . implode(',', $values)
+);
+```
+
+#### **4. Optimize Queries**
+```php
+// ❌ BAD - N+1 Query Problem
+$expenses = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}ffa_expenses");
+foreach ($expenses as $expense) {
+    $category = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}ffa_expense_categories WHERE id = {$expense->category_id}");
+    $vault = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = {$expense->vault_id}");
+}
+
+// ✅ GOOD - Single JOIN Query
+$expenses = $wpdb->get_results("
+    SELECT e.*, c.name AS category_name, v.name AS vault_name
+    FROM {$wpdb->prefix}ffa_expenses e
+    LEFT JOIN {$wpdb->prefix}ffa_expense_categories c ON e.category_id = c.id
+    LEFT JOIN {$wpdb->prefix}ffa_vaults v ON e.vault_id = v.id
+");
+```
+
+#### **5. Use Transients for Heavy Queries**
+```php
+function get_monthly_report_cached($month) {
+    $cache_key = "ffa_monthly_report_$month";
+    
+    // Try cache first
+    $report = get_transient($cache_key);
+    if (false !== $report) {
+        return $report;
+    }
+    
+    // Generate report (expensive operation)
+    $report = generate_monthly_report($month);
+    
+    // Cache for 1 hour
+    set_transient($cache_key, $report, HOUR_IN_SECONDS);
+    
+    return $report;
+}
+```
+
+#### **6. Pagination for Large Datasets**
+```php
+// ❌ BAD - Load all records
+$cashflows = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}ffa_cashflow");
+
+// ✅ GOOD - Paginate
+$page = 1;
+$per_page = 50;
+$offset = ($page - 1) * $per_page;
+
+$cashflows = $wpdb->get_results($wpdb->prepare("
+    SELECT * FROM {$wpdb->prefix}ffa_cashflow
+    ORDER BY created_at DESC
+    LIMIT %d OFFSET %d
+", $per_page, $offset));
+```
+
+#### **7. Async Processing for Heavy Operations**
+```php
+// Use WP Cron for non-blocking operations
+add_action('ffa_process_salary_deductions', function($salary_month) {
+    // This runs in background
+    $result = FFA_API::process_salary_deductions(['salary_month' => $salary_month]);
+    
+    // Send notification when done
+    wp_mail(
+        get_option('admin_email'),
+        'Salary Deductions Processed',
+        "Processed {$result['processed']} deductions for $salary_month"
+    );
+});
+
+// Schedule it
+if (!wp_next_scheduled('ffa_process_salary_deductions', ['2025-11'])) {
+    wp_schedule_single_event(
+        time() + 60, // Run in 1 minute
+        'ffa_process_salary_deductions',
+        ['2025-11']
+    );
+}
+```
+
+### 10.2 Security Best Practices
+
+#### **1. Always Validate Input**
+```php
+// ✅ Sanitize and validate
+$amount = floatval($_POST['amount']);
+$vault_id = intval($_POST['vault_id']);
+$description = sanitize_textarea_field($_POST['description']);
+
+// Check required fields
+if ($amount <= 0) {
+    wp_send_json_error('Invalid amount');
+}
+
+// Check permissions
+if (!current_user_can('manage_options')) {
+    wp_send_json_error('Unauthorized');
+}
+```
+
+#### **2. Use Prepared Statements**
+```php
+// ❌ NEVER do this
+$id = $_GET['id'];
+$result = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = $id");
+
+// ✅ ALWAYS use prepare
+$id = intval($_GET['id']);
+$result = $wpdb->get_row($wpdb->prepare(
+    "SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = %d",
+    $id
+));
+```
+
+#### **3. Check Nonces for Admin Actions**
+```php
+// In form
+wp_nonce_field('ffa_create_expense');
+
+// On submit
+if (!check_admin_referer('ffa_create_expense')) {
+    wp_die('Security check failed');
+}
+```
+
+#### **4. Validate JWT Tokens**
+```php
+// Already implemented in FFA_API::check_permission()
+// Token format: payload.signature
+// Validates:
+// - Token exists
+// - Format is correct
+// - Signature matches
+// - Not expired
+// - User role authorized
+```
+
+### 10.3 Database Best Practices
+
+#### **1. Use Transactions**
+```php
+$wpdb->query('START TRANSACTION');
+
+try {
+    // Multiple operations
+    $wpdb->insert(...);
+    $wpdb->update(...);
+    $wpdb->delete(...);
+    
+    $wpdb->query('COMMIT');
+} catch (Exception $e) {
+    $wpdb->query('ROLLBACK');
+    error_log('Transaction failed: ' . $e->getMessage());
+}
+```
+
+#### **2. Clean Old Data Periodically**
+```php
+// Add to WP-Cron (monthly)
+add_action('wp', function() {
+    if (!wp_next_scheduled('ffa_cleanup_old_data')) {
+        wp_schedule_event(time(), 'monthly', 'ffa_cleanup_old_data');
+    }
+});
+
+add_action('ffa_cleanup_old_data', function() {
+    global $wpdb;
+    
+    // Delete cashflow older than 2 years
+    $wpdb->query("
+        DELETE FROM {$wpdb->prefix}ffa_cashflow
+        WHERE created_at < DATE_SUB(NOW(), INTERVAL 2 YEAR)
+    ");
+    
+    // Optimize tables
+    $wpdb->query("OPTIMIZE TABLE {$wpdb->prefix}ffa_cashflow");
+});
+```
+
+#### **3. Monitor Table Sizes**
+```php
+function get_table_sizes() {
+    global $wpdb;
+    
+    $tables = [
+        'ffa_expenses',
+        'ffa_vaults',
+        'ffa_vendors',
+        'ffa_purchases',
+        'ffa_cashflow',
+        'ffa_company_loans',
+        'ffa_employee_loans',
+        'ffa_loan_payments'
+    ];
+    
+    $sizes = [];
+    foreach ($tables as $table) {
+        $result = $wpdb->get_row($wpdb->prepare("
+            SELECT 
+                table_name AS 'table',
+                ROUND(((data_length + index_length) / 1024 / 1024), 2) AS 'size_mb',
+                table_rows AS 'rows'
+            FROM information_schema.TABLES
+            WHERE table_schema = %s
+            AND table_name = %s
+        ", DB_NAME, $wpdb->prefix . $table));
+        
+        $sizes[$table] = $result;
+    }
+    
+    return $sizes;
+}
+
+// Usage
+$sizes = get_table_sizes();
+foreach ($sizes as $table => $info) {
+    echo "$table: {$info->rows} rows, {$info->size_mb} MB\n";
+}
+```
+
+### 10.4 Error Handling
+
+#### **1. Log Errors Properly**
+```php
+// Enable WordPress debug logging
+define('WP_DEBUG', true);
+define('WP_DEBUG_LOG', true);
+define('WP_DEBUG_DISPLAY', false);
+
+// Log FFA errors
+function ffa_log_error($message, $context = []) {
+    error_log(sprintf(
+        '[FFA Error] %s | Context: %s',
+        $message,
+        json_encode($context)
+    ));
+}
+
+// Usage
+if (!$vault) {
+    ffa_log_error('Vault not found', [
+        'vault_id' => $vault_id,
+        'payment_method' => $payment_method,
+        'warehouse' => $warehouse
+    ]);
+}
+```
+
+#### **2. Graceful Degradation**
+```php
+// If external service fails, continue with local data
+try {
+    $external_data = fetch_from_external_api();
+} catch (Exception $e) {
+    ffa_log_error('External API failed: ' . $e->getMessage());
+    $external_data = get_cached_data(); // Fallback
+}
+```
+
+#### **3. User-Friendly Error Messages**
+```php
+// ❌ BAD - Technical error to user
+return new WP_Error('db_error', $wpdb->last_error);
+
+// ✅ GOOD - Friendly message, log technical details
+ffa_log_error('Database error', ['query' => $wpdb->last_query, 'error' => $wpdb->last_error]);
+return new WP_Error('operation_failed', 'Unable to complete operation. Please try again.');
+```
+
+### 10.5 Code Organization
+
+#### **1. Use Helper Functions**
+```php
+// Create reusable helpers
+class FFA_Helpers {
+    public static function format_currency($amount, $currency = null) {
+        $currency = $currency ?: get_option('ffa_currency', 'EGP');
+        return $currency . ' ' . number_format($amount, 2);
+    }
+    
+    public static function get_warehouse_name($code) {
+        $warehouses = [
+            'oraby' => 'Oraby Branch',
+            'giza' => 'Giza Branch',
+            'lavista' => 'Lavista Branch'
+        ];
+        return $warehouses[$code] ?? $code;
+    }
+    
+    public static function calculate_due_date($start_date, $period, $frequency) {
+        $intervals = [
+            'daily' => 'days',
+            'weekly' => 'weeks',
+            'monthly' => 'months'
+        ];
+        return date('Y-m-d', strtotime("$start_date + $period {$intervals[$frequency]}"));
+    }
+}
+
+// Usage
+echo FFA_Helpers::format_currency(1500.50); // EGP 1,500.50
+```
+
+***
+
+## 11. Troubleshooting
+
+### 11.1 Common Issues
+
+#### **Issue 1: Vault Balance Not Updating**
+```php
+// Check if hooks are firing
+add_action('woocommerce_order_status_completed', function($order_id) {
+    error_log("FFA: Order #$order_id completed hook fired");
+}, 1);
+
+// Check if vault exists
+$vault = FFA_Database::find_vault($warehouse, $payment_method);
+if (!$vault) {
+    error_log("FFA: No vault found for $warehouse / $payment_method");
+}
+
+// Check transaction status
+$cashflow = $wpdb->get_row($wpdb->prepare(
+    "SELECT * FROM {$wpdb->prefix}ffa_cashflow WHERE order_id = %d",
+    $order_id
+));
+if (!$cashflow) {
+    error_log("FFA: No cashflow record for order #$order_id");
+}
+```
+
+#### **Issue 2: API Returns 401 Unauthorized**
+```php
+// Check token format
+$token = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+if (empty($token)) {
+    die('Token missing');
+}
+
+// Validate token
+$token = str_replace('Bearer ', '', $token);
+$validation = FFA_Database::validate_token($token);
+
+if (is_wp_error($validation)) {
+    die('Token invalid: ' . $validation->get_error_message());
+}
+
+// Check token payload
+$parts = explode('.', $token);
+$payload = json_decode(base64_decode($parts[0]));
+print_r($payload);
+```
+
+#### **Issue 3: Commission Not Calculated**
+```php
+// Check vault commission rate
+$vault = $wpdb->get_row("SELECT * FROM {$wpdb->prefix}ffa_vaults WHERE id = 2");
+echo "Commission Rate: {$vault->commission_rate}%\n";
+
+// Check if commission is applied
+$amount = 1000;
+$commission = ($amount * $vault->commission_rate) / 100;
+$net = $amount - $commission;
+echo "Gross: $amount\n";
+echo "Commission: $commission\n";
+echo "Net: $net\n";
+
+// Check commission expense
+$commission_expense = $wpdb->get_row($wpdb->prepare("
+    SELECT * FROM {$wpdb->prefix}ffa_expenses
+    WHERE description LIKE %s
+    ORDER BY created_at DESC
+    LIMIT 1
+", '%Commission%'));
+```
+
+#### **Issue 4: Slow API Response**
+```php
+// Enable query monitoring
+define('SAVEQUERIES', true);
+
+// After API call
+global $wpdb;
+echo "Queries: " . count($wpdb->queries) . "\n";
+echo "Time: " . array_sum(array_column($wpdb->queries, 1)) . " seconds\n";
+
+// Find slow queries
+foreach ($wpdb->queries as $query) {
+    if ($query[1] > 0.1) { // Slower than 100ms
+        echo "Slow query ({$query[1]}s): {$query[0]}\n";
+    }
+}
+
+// Add indexes for slow queries
+ALTER TABLE wp_ffa_cashflow ADD INDEX idx_order_type (order_id, type);
+```
+
+### 11.2 Debug Mode
+
+```php
+// Enable FFA debug mode
+define('FFA_DEBUG', true);
+
+// Add to class-ffa-database.php
+public static function debug_log($message, $data = null) {
+    if (defined('FFA_DEBUG') && FFA_DEBUG) {
+        error_log('[FFA Debug] ' . $message);
+        if ($data) {
+            error_log('[FFA Debug Data] ' . print_r($data, true));
+        }
+    }
+}
+
+// Usage
+FFA_Database::debug_log('Creating expense', $expense_data);
+```
+
+### 11.3 Performance Monitoring
+
+```php
+// Add performance tracking
+function ffa_track_performance($operation, $callback) {
+    $start = microtime(true);
+    $result = $callback();
+    $duration = microtime(true) - $start;
+    
+    if ($duration > 1.0) { // Slower than 1 second
+        error_log("FFA Performance Warning: $operation took {$duration}s");
+    }
+    
+    return $result;
+}
+
+// Usage
+$expenses = ffa_track_performance('Get expenses', function() use ($wpdb) {
+    return $wpdb->get_results("SELECT * FROM {$wpdb->prefix}ffa_expenses LIMIT 100");
+});
+```
+
+***
+
+## 📚 **Quick Reference Card**
+
+### **Essential Endpoints**
+```
+POST   /ffa/v1/auth/login              # Login
+GET    /ffa/v1/dashboard                # Dashboard data
+GET    /ffa/v1/expenses                 # List expenses
+POST   /ffa/v1/expenses                 # Create expense
+GET    /ffa/v1/vaults                   # List vaults
+POST   /ffa/v1/vaults/transfer          # Transfer funds
+GET    /ffa/v1/cashflow                 # Transaction history
+```
+
+### **Key Functions**
+```php
+FFA_Database::find_vault($warehouse, $payment_method)
+FFA_Database::record_cashflow($type, $category, $amount, ...)
+FFA_Database::get_vaults($force_refresh = false)
+FFA_Database::clear_cache()
+FFA_Database::calculate_profit_margin($period)
+```
+
+### **Important Hooks**
+```php
+do_action('ffa_after_create_expense', $id, $data)
+do_action('ffa_order_processed', $order_id, $vault_id, $amount)
+apply_filters('ffa_commission_rate', $rate, $vault_id, $method)
+```
