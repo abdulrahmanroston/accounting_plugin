@@ -4,7 +4,13 @@
  * Description: High-performance accounting system with API, integrated with WooCommerce & SHRMS
  * Version: 3.0.0
  * Author: Abdulrahman Roston
+ * Author URI: https://github.com/abdulrahmanroston
+ * Plugin URI: https://github.com/abdulrahmanroston/accounting_plugin
  * Text Domain: ffa
+ * Requires at least: 5.8
+ * Requires PHP: 7.4
+ * License: GPL v2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
 
 if (!defined('ABSPATH')) exit;
@@ -14,6 +20,29 @@ define('FFA_VERSION', '3.0.0');
 define('FFA_PATH', plugin_dir_path(__FILE__));
 define('FFA_URL', plugin_dir_url(__FILE__));
 define('FFA_API_SECRET', 'ffa-secret-key-2025-v3');
+
+/**
+ * Setup automatic updates from GitHub
+ * Note: Requires plugin-update-checker library to be installed
+ * Download from: https://github.com/YahnisElsts/plugin-update-checker
+ */
+if (file_exists(FFA_PATH . 'includes/plugin-update-checker/plugin-update-checker.php')) {
+    require FFA_PATH . 'includes/plugin-update-checker/plugin-update-checker.php';
+    
+    use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+    
+    $ffaUpdateChecker = PucFactory::buildUpdateChecker(
+        'https://github.com/abdulrahmanroston/accounting_plugin/',
+        __FILE__,
+        'ffa-plugin'
+    );
+    
+    // Set the branch that contains stable releases
+    $ffaUpdateChecker->setBranch('main');
+    
+    // Enable release assets for proper ZIP downloads
+    $ffaUpdateChecker->getVcsApi()->enableReleaseAssets();
+}
 
 // Autoload classes
 spl_autoload_register(function ($class) {
