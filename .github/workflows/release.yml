@@ -1,4 +1,4 @@
-name: Auto Release on Version Bump
+name: Create Plugin Release
 
 on:
   push:
@@ -7,93 +7,79 @@ on:
     paths:
       - 'ffa-plugin.php'
 
-permissions:
-  contents: write
-
 jobs:
-  check-version-and-release:
+  release:
+    name: Create Release & Build ZIP
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v4
 
-      - name: Get version from plugin file
+      - name: Extract version from ffa-plugin.php
         id: get_version
         run: |
           VERSION=$(grep -oP "Version:\s*\K[0-9.]+" ffa-plugin.php)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+          echo "Detected version: $VERSION"
 
       - name: Check if tag exists
         id: check_tag
         run: |
           if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.get_version.outputs.version }} already exists"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.get_version.outputs.version }} does not exist"
           fi
 
-      - name: Create plugin ZIP
+      - name: Create Release Tag
         if: steps.check_tag.outputs.exists == 'false'
         run: |
-          mkdir -p ffa-plugin
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release version ${{ steps.get_version.outputs.version }}"
+          git push origin "v${{ steps.get_version.outputs.version }}"
+
+      - name: Build plugin ZIP
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          mkdir -p build
           rsync -av --exclude='.git' \
                     --exclude='.github' \
+                    --exclude='build' \
                     --exclude='node_modules' \
                     --exclude='.gitignore' \
-                    --exclude='.gitattributes' \
-                    --exclude='*.md' \
-                    --exclude='redme.txt' \
-                    ./ ffa-plugin/
-          zip -r ffa-plugin.zip ffa-plugin
-          echo "ZIP file created: ffa-plugin.zip"
-
-      - name: Generate changelog
-        if: steps.check_tag.outputs.exists == 'false'
-        id: changelog
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            echo "First release"
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
-          else
-            echo "Changes since $LAST_TAG"
-            CHANGELOG=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
-          fi
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+                    --exclude='.env' \
+                    . build/ffa-plugin/
+          cd build
+          zip -r ffa-plugin-v${{ steps.get_version.outputs.version }}.zip ffa-plugin/
 
       - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          name: Release v${{ steps.get_version.outputs.version }}
+          name: FFA Accounting Plugin v${{ steps.get_version.outputs.version }}
           body: |
-            # 🚀 FFA Plugin v${{ steps.get_version.outputs.version }}
+            ## What's Changed
+            Check [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
             
-            ## 📋 Changes in this version
-            
-            ${{ steps.changelog.outputs.changelog }}
-            
-            ## 📥 Installation
-            
-            1. Download `ffa-plugin.zip` from Assets below
+            ## Installation
+            1. Download `ffa-plugin-v${{ steps.get_version.outputs.version }}.zip`
             2. Go to WordPress Admin → Plugins → Add New → Upload Plugin
-            3. Choose the downloaded ZIP file and install
-            4. Activate the plugin
+            3. Upload the ZIP file and activate
             
-            ## 📚 Documentation
-            
-            For detailed documentation, visit the README.
-          files: ffa-plugin.zip
+            ## Requirements
+            - WordPress 5.8+
+            - PHP 7.4+
+          files: |
+            build/ffa-plugin-v${{ steps.get_version.outputs.version }}.zip
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip - Tag already exists
+        if: steps.check_tag.outputs.exists == 'true'
+        run: |
+          echo "Tag v${{ steps.get_version.outputs.version }} already exists. Skipping release."
